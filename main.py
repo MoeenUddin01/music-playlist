@@ -1,0 +1,318 @@
+import pandas as pd
+import streamlit as st
+import random
+import os
+import json
+
+# ---------------- Song Class ----------------
+
+
+class Song:
+    def __init__(self, title, artist, duration, file_path=None):
+        self.title = title
+        self.artist = artist
+        self.duration = duration
+        self.file_path = file_path
+
+    def __str__(self):
+        return f"{self.title} -- {self.artist} ({self.duration})"
+
+
+# ---------------- Playlist Class ----------------
+class Playlist:
+    def __init__(self):
+        self.songs = []
+        self.current_index = -1
+
+    def add_song(self, song):
+        self.songs.append(song)
+
+    def remove_song(self, index):
+        if 0 <= index < len(self.songs):
+            self.songs.pop(index)
+            if self.current_index >= len(self.songs):
+                self.current_index = len(self.songs) - 1
+
+    def get_current_song(self):
+        if 0 <= self.current_index < len(self.songs):
+            return self.songs[self.current_index]
+        return None
+
+    def next_song(self):
+        if not self.songs:
+            return None
+        self.current_index = (self.current_index + 1) % len(self.songs)
+        return self.get_current_song()
+
+    def prev_song(self):
+        if not self.songs:
+            return None
+        self.current_index = (self.current_index - 1) % len(self.songs)
+        return self.get_current_song()
+
+    def shuffle(self):
+        random.shuffle(self.songs)
+        self.current_index = -1
+
+
+# ---------------- Streamlit App ----------------
+st.set_page_config(page_title=" Music Playlist", layout="centered")
+
+
+# --- Neon Mode CSS ---
+neon_mode = """
+<style>
+/* Background */
+body {
+    background-image: url("https://images.unsplash.com/photo-1601042879364-f3947d3f9c16?fm=jpg&ixid=M3wxMjA3fDB8MHxzZWFyY2h8M3x8bmVvbiUyMGNpdHl8ZW58MHx8MHx8fDA%3D&ixlib=rb-4.1.0&q=60&w=3000");
+    background-size: cover;
+    background-position: center;
+    background-attachment: fixed;
+    color: #f2f2f7; /* soft neutral white */
+    font-family: "Orbitron", sans-serif;
+}
+
+/* Glass Effect Container */
+.stApp {
+    background: rgba(10, 10, 15, 0.55);
+    border-radius: 16px;
+    padding: 20px;
+    box-shadow: 0px 0px 30px rgba(255, 20, 147, 0.4);
+}
+
+/* Titles */
+h1 {
+    color: #ff4da6; /* rose neon */
+    text-shadow: 0px 0px 12px #ff4da6, 0px 0px 25px rgba(255, 128, 191, 0.8);
+    text-align: center;
+}
+h2, h3 {
+    color: #66ffe7; /* aqua neon */
+    text-shadow: 0px 0px 10px #66ffe7, 0px 0px 18px rgba(102, 255, 231, 0.7);
+}
+
+/* Paragraph Text */
+p, label, span {
+    color: #e6e6eb;
+    text-shadow: 0px 0px 4px rgba(255, 255, 255, 0.25);
+}
+
+/* Cyberpunk Buttons */
+.stButton > button {
+    background: linear-gradient(135deg, #ff4da6, #ff80bf);
+    color: #fff;
+    border: none;
+    border-radius: 12px;
+    font-weight: bold;
+    padding: 10px 24px;
+    font-size: 16px;
+    box-shadow: 0px 0px 20px rgba(255, 128, 191, 0.6);
+    text-shadow: 0px 0px 6px rgba(255, 255, 255, 0.7);
+    transition: all 0.3s ease-in-out;
+}
+.stButton > button:hover {
+    background: linear-gradient(135deg, #66ffe7, #33ffcc);
+    box-shadow: 0px 0px 25px rgba(102, 255, 231, 0.9);
+    transform: scale(1.1);
+}
+
+/* Input Fields */
+.stTextInput > div > div > input {
+    background: rgba(20, 20, 30, 0.7);
+    color: #f2f2f7;
+    border-radius: 10px;
+    border: 1px solid #ff80bf;
+    padding: 8px;
+    box-shadow: 0px 0px 10px rgba(255, 128, 191, 0.4);
+}
+.stTextInput > div > div > input:focus {
+    border: 1px solid #66ffe7;
+    box-shadow: 0px 0px 18px rgba(102, 255, 231, 0.7);
+}
+
+/* Selectbox & Dropdowns */
+.stSelectbox > div > div {
+    background: rgba(20, 20, 30, 0.75);
+    color: #f2f2f7;
+    border-radius: 10px;
+    border: 1px solid #ff4da6;
+    box-shadow: 0px 0px 12px rgba(255, 77, 166, 0.5);
+}
+</style>
+"""
+st.markdown(neon_mode, unsafe_allow_html=True)
+
+
+st.title(" Music Playlist")
+if not os.path.exists("songs"):
+    os.makedirs("songs")
+
+# Store Playlist in session_state (so it doesn't reset on every click)
+if "playlist" not in st.session_state:
+    st.session_state.playlist = Playlist()
+if "status" not in st.session_state:
+    st.session_state.status = "No song playing"
+
+playlist = st.session_state.playlist
+
+
+#     Load data info from songs.json 
+metadata_file = "songs/songs.json"
+if os.path.exists(metadata_file) and not playlist.songs:
+    with open(metadata_file, "r") as f:
+        songs_data = json.load(f)
+    for song_info in songs_data:
+        loaded_song = Song(
+            song_info["title"],
+            song_info["artist"],
+            song_info["duration"],
+            song_info["file_path"]
+        )
+        playlist.add_song(loaded_song)
+
+
+# -------- Add Song Form --------
+st.subheader("➕ Add a New Song")
+with st.form("add_song_form"):
+    title = st.text_input("Song Title")
+    artist = st.text_input("Artist")
+    duration = st.text_input("Duration (e.g. 3:45)")
+    file = st.file_uploader("upload song file(MP3/WAV)", type=["mp3", "wav"])
+    submitted = st.form_submit_button("Add Song")
+
+if submitted:
+    if title and artist and duration and file:
+        save_path = os.path.join("songs", file.name)
+        with open(save_path, "wb") as f:
+            f.write(file.getbuffer())
+
+        # Create Song object
+        new_song = Song(title, artist, duration, save_path)
+        playlist.add_song(new_song)
+
+        # Save metadata in songs.json
+        metadata_file = "songs/songs.json"
+        if os.path.exists(metadata_file):
+            with open(metadata_file, "r") as f:
+                songs_data = json.load(f)
+        else:
+            songs_data = []
+
+        songs_data.append({
+            "title": title,
+            "artist": artist,
+            "duration": duration,
+            "file_path": save_path
+        })
+
+        with open(metadata_file, "w") as f:
+            json.dump(songs_data, f, indent=4)
+
+        st.success(f"Added: {new_song} (saved to {save_path})")
+    else:
+        st.warning("Please fill fields and upload a song file!")
+
+
+
+# -------- Playlist Display --------
+
+st.subheader("📃 Playlist")
+if playlist.songs:
+    # Convert playlist songs into a DataFrame
+    df = pd.DataFrame([{
+        "Select": False,   # Add a checkbox column
+        "Title": song.title,
+        "Artist": song.artist,
+        "Duration": song.duration
+    } for song in playlist.songs])
+     
+     
+     #this is the code of the song Table where we select the song and than we can remove it
+    edited_df = st.data_editor(
+        df,
+        hide_index=True,
+        num_rows="fixed",
+        use_container_width=True,
+        column_config={
+            "Select": st.column_config.CheckboxColumn("✅ Select"),
+            "Title": "🎶 Title",
+            "Artist": "👤 Artist",
+            "Duration": "⏱ Duration"
+        },
+        disabled=["Title", "Artist", "Duration"],  # can't edit song details only select and delete it 
+    )
+
+    # Get indices of selected songs
+    selected_indices = edited_df.index[edited_df["Select"] == True].tolist()
+
+    # Remove button at bottom
+if st.button("❌ Remove Selected Songs", use_container_width=True):
+    if selected_indices:
+        
+        metadata_file = "songs/songs.json" #here it will check the selected song in the songs save folder
+        if os.path.exists(metadata_file):
+            with open(metadata_file, "r") as f:
+                songs_data = json.load(f)
+        else:
+            songs_data = []
+
+        # Remove selected songs from playlist and metadata
+        for idx in sorted(selected_indices, reverse=True):
+            removed_song = playlist.songs[idx]
+            playlist.remove_song(idx)
+
+            # Remove from songs.jsonb it will remove the data of the song 
+            songs_data = [s for s in songs_data if s["file_path"] != removed_song.file_path]
+
+            # Also delete the actual song file/ It will delete the real file save in computer folder of this app
+            if os.path.exists(removed_song.file_path):
+                os.remove(removed_song.file_path)
+
+        # after deleting the song fully \ this code update the full data 
+        with open(metadata_file, "w") as f:
+            json.dump(songs_data, f, indent=4)
+
+        st.success("Selected songs removed successfully!")
+        st.rerun()
+    else:
+        st.warning("No song selected to remove.")
+
+else:
+    st.info("No songs in the playlist yet.")
+
+
+# -------- Controls --------
+st.subheader("▶️ Controls")
+col1, col2, col3, col4 = st.columns(4)
+
+if col1.button("⏮️ Previous"):
+    song = playlist.prev_song()
+    st.session_state.status = f"Now Playing: {song}" if song else "Playlist is empty"
+
+if col2.button("⏭️ Next"):
+    song = playlist.next_song()
+    st.session_state.status = f"Now Playing: {song}" if song else "Playlist is empty"
+
+if col3.button("🔀 Shuffle Play"):
+    if playlist.songs:
+        song = random.choice(playlist.songs)   # pick a random song
+        playlist.current_index = playlist.songs.index(
+            song)  # set it as current
+        st.session_state.status = f"Now Playing (Shuffled): {song}"
+    else:
+        st.warning("Add some songs first.")
+
+
+if col4.button("❌ Clear Playlist"):
+    playlist.songs.clear()
+    st.session_state.status = "Playlist cleared!"
+
+
+# -------- Status --------
+st.subheader("📢 Status")
+current_song = playlist.get_current_song()
+if current_song and current_song.file_path:
+    st.write(f"🎶 Now Playing {current_song}")
+    st.audio(current_song.file_path, format="audio/mp3")
+else:
+    st.write(st.session_state.status)
