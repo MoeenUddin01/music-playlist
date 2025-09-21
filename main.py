@@ -215,19 +215,16 @@ if submitted:
 
 
 # -------- Playlist Display --------
-
 st.subheader("📃 Playlist")
 if playlist.songs:
     # Convert playlist songs into a DataFrame
     df = pd.DataFrame([{
-        "Select": False,   # Add a checkbox column
+        "Select": False,
         "Title": song.title,
         "Artist": song.artist,
         "Duration": song.duration
     } for song in playlist.songs])
-     
-     
-     #this is the code of the song Table where we select the song and than we can remove it
+
     edited_df = st.data_editor(
         df,
         hide_index=True,
@@ -239,46 +236,39 @@ if playlist.songs:
             "Artist": "👤 Artist",
             "Duration": "⏱ Duration"
         },
-        disabled=["Title", "Artist", "Duration"],  # can't edit song details only select and delete it 
+        disabled=["Title", "Artist", "Duration"],
     )
 
     # Get indices of selected songs
     selected_indices = edited_df.index[edited_df["Select"] == True].tolist()
 
-    # Remove button at bottom
-if st.button("❌ Remove Selected Songs", use_container_width=True):
-    if selected_indices:
-        
-        metadata_file = "songs/songs.json" #here it will check the selected song in the songs save folder
-        if os.path.exists(metadata_file):
-            with open(metadata_file, "r") as f:
-                songs_data = json.load(f)
+    if st.button("❌ Remove Selected Songs", use_container_width=True):
+        if selected_indices:
+            metadata_file = "songs/songs.json"
+            if os.path.exists(metadata_file):
+                with open(metadata_file, "r") as f:
+                    songs_data = json.load(f)
+            else:
+                songs_data = []
+
+            for idx in sorted(selected_indices, reverse=True):
+                removed_song = playlist.songs[idx]
+                playlist.remove_song(idx)
+                songs_data = [s for s in songs_data if s["file_path"] != removed_song.file_path]
+
+                if os.path.exists(removed_song.file_path):
+                    os.remove(removed_song.file_path)
+
+            with open(metadata_file, "w") as f:
+                json.dump(songs_data, f, indent=4)
+
+            st.success("Selected songs removed successfully!")
+            st.rerun()
         else:
-            songs_data = []
-
-        # Remove selected songs from playlist and metadata
-        for idx in sorted(selected_indices, reverse=True):
-            removed_song = playlist.songs[idx]
-            playlist.remove_song(idx)
-
-            # Remove from songs.jsonb it will remove the data of the song 
-            songs_data = [s for s in songs_data if s["file_path"] != removed_song.file_path]
-
-            # Also delete the actual song file/ It will delete the real file save in computer folder of this app
-            if os.path.exists(removed_song.file_path):
-                os.remove(removed_song.file_path)
-
-        # after deleting the song fully \ this code update the full data 
-        with open(metadata_file, "w") as f:
-            json.dump(songs_data, f, indent=4)
-
-        st.success("Selected songs removed successfully!")
-        st.rerun()
-    else:
-        st.warning("No song selected to remove.")
-
+            st.warning("No song selected to remove.")
 else:
     st.info("No songs in the playlist yet.")
+
 
 
 # -------- Controls --------
@@ -293,26 +283,39 @@ if col2.button("⏭️ Next"):
     song = playlist.next_song()
     st.session_state.status = f"Now Playing: {song}" if song else "Playlist is empty"
 
-if col3.button("🔀 Shuffle Play"):
+if col3.button("🔀 Shuffle Playlist"):
     if playlist.songs:
-        song = random.choice(playlist.songs)   # pick a random song
-        playlist.current_index = playlist.songs.index(
-            song)  # set it as current
+        playlist.shuffle()
+        song = playlist.next_song()
         st.session_state.status = f"Now Playing (Shuffled): {song}"
     else:
         st.warning("Add some songs first.")
 
 
+
 if col4.button("❌ Clear Playlist"):
+    # delete all files
+    for song in playlist.songs:
+        if song.file_path and os.path.exists(song.file_path):
+            os.remove(song.file_path)
+
+    # reset playlist + metadata
     playlist.songs.clear()
+    with open(metadata_file, "w") as f:
+        json.dump([], f)
+
     st.session_state.status = "Playlist cleared!"
+    st.rerun()
 
 
 # -------- Status --------
 st.subheader("📢 Status")
 current_song = playlist.get_current_song()
 if current_song and current_song.file_path:
+    file_ext = os.path.splitext(current_song.file_path)[1].lower()
+    audio_format = "audio/wav" if file_ext == ".wav" else "audio/mp3"
     st.write(f"🎶 Now Playing {current_song}")
-    st.audio(current_song.file_path, format="audio/mp3")
+    st.audio(current_song.file_path, format=audio_format)
 else:
     st.write(st.session_state.status)
+
