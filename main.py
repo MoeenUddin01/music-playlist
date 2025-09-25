@@ -3,19 +3,90 @@ import streamlit as st
 import random
 import os
 import json
+from mutagen import File as MutagenFile
+from mutagen import File as MutagenFile
+from mutagen.mp3 import MP3
+from mutagen.wave import WAVE
+import requests
+
+def fetch_artist_from_itunes(title: str):
+    try:
+        url = f"https://itunes.apple.com/search"
+        params = {"term": title, "entity": "musicTrack", "limit": 1}
+        response = requests.get(url, params=params)
+        data = response.json()
+        if data["resultCount"] > 0:
+            return data["results"][0]["artistName"]
+    except Exception as e:
+        print("Artist lookup failed:", e)
+    return "Unknown Artist"
+
+
+
+def get_duration(save_path):
+    ext = os.path.splitext(save_path)[1].lower()
+    duration = "Unknown"
+
+    try:
+        if ext == ".mp3":
+            audio = MP3(save_path)
+            total_seconds = int(audio.info.length)
+            duration = f"{total_seconds // 60}:{total_seconds % 60:02d}"
+
+        elif ext == ".wav":
+            audio = WAVE(save_path)
+            total_seconds = int(audio.info.length)
+            duration = f"{total_seconds // 60}:{total_seconds % 60:02d}"
+
+        else:
+            audio = MutagenFile(save_path)
+            if audio and audio.info:
+                total_seconds = int(audio.info.length)
+                duration = f"{total_seconds // 60}:{total_seconds % 60:02d}"
+
+    except Exception as e:
+        print(f"Duration extraction failed: {e}")
+
+    return duration
 
 # ---------------- Song Class ----------------
 
 
+from mutagen.mp3 import MP3
+import os
+
 class Song:
-    def __init__(self, title, artist, duration, file_path=None):
-        self.title = title
-        self.artist = artist
-        self.duration = duration
+    def __init__(self, file_path, title=None, artist=None, duration=None):
         self.file_path = file_path
 
+        # Title
+        self.title = title or os.path.splitext(os.path.basename(file_path))[0]
+
+        # Duration
+        if duration:
+            self.duration = duration
+        else:
+            try:
+                audio = MP3(file_path)
+                self.duration = round(audio.info.length, 2)
+            except Exception:
+                self.duration = "Unknown"
+
+        # Artist (priority: passed value → metadata → Unknown)
+        if artist and artist != "Unknown Artist":
+            self.artist = artist
+        else:
+            try:
+                audio = MP3(file_path)
+                self.artist = audio.get("TPE1", ["Unknown Artist"])[0]
+            except Exception:
+                self.artist = "Unknown Artist"
+
     def __str__(self):
-        return f"{self.title} -- {self.artist} ({self.duration})"
+        return f"{self.title} - {self.artist}"
+
+
+
 
 
 # ---------------- Playlist Class ----------------
@@ -163,35 +234,53 @@ if os.path.exists(metadata_file) and not playlist.songs:
         songs_data = json.load(f)
     for song_info in songs_data:
         loaded_song = Song(
-            song_info["title"],
-            song_info["artist"],
-            song_info["duration"],
-            song_info["file_path"]
-        )
+            file_path=song_info["file_path"],
+            title=song_info.get("title"),
+            artist=song_info.get("artist"),
+            duration=song_info.get("duration")
+            )
         playlist.add_song(loaded_song)
 
 
 # -------- Add Song Form --------
+
+
 st.subheader("➕ Add a New Song")
 with st.form("add_song_form"):
-    title = st.text_input("Song Title")
-    artist = st.text_input("Artist")
-    duration = st.text_input("Duration (e.g. 3:45)")
-    file = st.file_uploader("upload song file(MP3/WAV)", type=["mp3", "wav"])
+    file = st.file_uploader("Upload song file (MP3/WAV)", type=["mp3", "wav"])
     submitted = st.form_submit_button("Add Song")
 
 if submitted:
-    if title and artist and duration and file:
+    if file:
         save_path = os.path.join("songs", file.name)
         with open(save_path, "wb") as f:
             f.write(file.getbuffer())
 
-        # Create Song object
-        new_song = Song(title, artist, duration, save_path)
+        # ---- Extract metadata automatically using mutagen ----
+        audio = MutagenFile(save_path, easy=True)
+
+        title = audio.get("title", [os.path.splitext(file.name)[0]])[0]
+        artist = audio.get("artist", ["Unknown Artist"])[0]
+        if artist == "Unknown Artist":
+            artist = fetch_artist_from_itunes(title)
+
+
+        # duration in seconds
+        duration = get_duration(save_path)
+
+
+        
+        # Create Song object (with fetched metadata)
+        new_song = Song(
+            file_path=save_path,
+            title=title,
+            artist=artist,
+            duration=duration
+            )
         playlist.add_song(new_song)
 
+
         # Save metadata in songs.json
-        metadata_file = "songs/songs.json"
         if os.path.exists(metadata_file):
             with open(metadata_file, "r") as f:
                 songs_data = json.load(f)
@@ -210,8 +299,7 @@ if submitted:
 
         st.success(f"Added: {new_song} (saved to {save_path})")
     else:
-        st.warning("Please fill fields and upload a song file!")
-
+        st.warning("Please upload a song file!")
 
 
 # -------- Playlist Display --------
