@@ -4,22 +4,49 @@ import random
 import os
 import json
 from mutagen import File as MutagenFile
-from mutagen import File as MutagenFile
 from mutagen.mp3 import MP3
 from mutagen.wave import WAVE
 import requests
+import uuid
+
+# ---------------- Jamendo API ----------------
+JAMENDO_CLIENT_ID = "YOUR_CLIENT_ID"   # get from https://developer.jamendo.com/v3.0
+BASE_URL = "https://api.jamendo.com/v3.0"
+
+def search_jamendo(term, limit=8):
+    params = {
+        "client_id": "beb7f7ca",
+        "format": "json",
+        "limit": limit,
+        "fuzzyfields": "track_name",
+        "order": "popularity_total",
+        "search": term
+    }
+    response = requests.get(f"{BASE_URL}/tracks", params=params, timeout=5)
+    data = response.json()
+    if "results" in data:
+        return data["results"]
+    return []
+
+
+
 
 def fetch_artist_from_itunes(title: str):
     try:
-        url = f"https://itunes.apple.com/search"
+        url = "https://itunes.apple.com/search"
         params = {"term": title, "entity": "musicTrack", "limit": 1}
-        response = requests.get(url, params=params)
+        response = requests.get(url, params=params, timeout=5)
+        response.raise_for_status()
         data = response.json()
-        if data["resultCount"] > 0:
-            return data["results"][0]["artistName"]
+        if data.get("resultCount", 0) > 0:
+            artist = data["results"][0].get("artistName", "Unknown Artist")
+            artwork = data["results"][0].get("artworkUrl100", None)  # 🎨 album art
+            return artist, artwork
+    except requests.Timeout:
+        print("Artist lookup timed out! Skipping iTunes lookup.")
     except Exception as e:
         print("Artist lookup failed:", e)
-    return "Unknown Artist"
+    return "Unknown Artist", None
 
 
 
@@ -59,18 +86,15 @@ class Song:
     def __init__(self, file_path, title=None, artist=None, duration=None):
         self.file_path = file_path
 
-        # Title
+        # Title: fallback to filename if not provided
         self.title = title or os.path.splitext(os.path.basename(file_path))[0]
 
-        # Duration
-        if duration:
+        # Duration: always use mm:ss from get_duration()
+        # (even if duration was passed in, we normalize it to mm:ss format)
+        if duration and isinstance(duration, str):
             self.duration = duration
         else:
-            try:
-                audio = MP3(file_path)
-                self.duration = round(audio.info.length, 2)
-            except Exception:
-                self.duration = "Unknown"
+            self.duration = get_duration(file_path)
 
         # Artist (priority: passed value → metadata → Unknown)
         if artist and artist != "Unknown Artist":
@@ -217,6 +241,40 @@ st.markdown(neon_mode, unsafe_allow_html=True)
 st.title(" Music Playlist")
 if not os.path.exists("songs"):
     os.makedirs("songs")
+    
+    # -------- Jamendo Search --------
+st.subheader("🌍 Search Free Music (Jamendo API)")
+
+query = st.text_input("🔍 Enter a song or artist name (Jamendo catalog)", "")
+if query:
+    tracks = search_jamendo(query)
+
+    if tracks:
+        cols = st.columns(4)  # show results in a grid (Spotify-style)
+
+        for i, track in enumerate(tracks):
+            col = cols[i % 4]
+            with col:
+                st.image(track["album_image"], width=150)
+                st.write(f"**{track['name']}**")
+                st.caption(f"{track['artist_name']}")
+                
+                if st.button("▶️ Play", key=f"jamendo_play_{i}"):
+                    st.session_state["jamendo_current"] = track
+
+# -------- Jamendo Now Playing --------
+if "jamendo_current" in st.session_state:
+    t = st.session_state["jamendo_current"]
+    st.markdown("---")
+    st.subheader("🎶 Now Playing (Jamendo)")
+    st.image(t["album_image"], width=200)
+    st.write(f"**{t['name']}** — {t['artist_name']}")
+    st.audio(t["audio"])  # full track playback
+
+
+
+
+
 
 # Store Playlist in session_state (so it doesn't reset on every click)
 if "playlist" not in st.session_state:
@@ -252,9 +310,13 @@ with st.form("add_song_form"):
 
 if submitted:
     if file:
-        save_path = os.path.join("songs", file.name)
+       
+        #genearta a unique file name to avoide overwriting 
+        unique_name = f"{uuid.uuid4().hex}_{file.name}"
+        save_path = os.path.join("songs", unique_name)
         with open(save_path, "wb") as f:
             f.write(file.getbuffer())
+        
 
         # ---- Extract metadata automatically using mutagen ----
         audio = MutagenFile(save_path, easy=True)
@@ -400,10 +462,8 @@ if col4.button("❌ Clear Playlist"):
 st.subheader("📢 Status")
 current_song = playlist.get_current_song()
 if current_song and current_song.file_path:
-    file_ext = os.path.splitext(current_song.file_path)[1].lower()
-    audio_format = "audio/wav" if file_ext == ".wav" else "audio/mp3"
     st.write(f"🎶 Now Playing {current_song}")
-    st.audio(current_song.file_path, format=audio_format)
+    # Streamlit auto-detects mp3/wav, no need to specify format
+    st.audio(current_song.file_path)
 else:
     st.write(st.session_state.status)
-
